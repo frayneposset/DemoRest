@@ -11,9 +11,8 @@ import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.client.RestTemplate
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.awaitBody
+import kotlin.reflect.KSuspendFunction0
 import kotlin.time.measureTimedValue
-
-private const val i = 5000
 
 @RestController
 class DemoClientController(webclientBuilder: WebClient.Builder) {
@@ -22,23 +21,27 @@ class DemoClientController(webclientBuilder: WebClient.Builder) {
     val webClient = webclientBuilder.build()
     val url = "http://localhost:8080/people/50"
 
-    @GetMapping("/restTemplate/{number}")
-    fun restTemplate(@PathVariable number: Int): Long {
-        return process(::restTemplateResult)
+    @GetMapping("/restTemplate/{numberOfSimultaneousRequests}")
+    fun restTemplate(@PathVariable numberOfSimultaneousRequests: Int): Long {
+        return process(::restTemplateResult,numberOfSimultaneousRequests)
     }
 
 
-    @GetMapping("/webClient/{number}")
-    suspend fun webClient(@PathVariable number: Int): Long {
-        return process(::webClientResult)
+    @GetMapping("/webClient/{numberOfSimultaneousRequests}")
+    suspend fun webClient(@PathVariable numberOfSimultaneousRequests: Int): Long {
+        return process(::webClientResult,numberOfSimultaneousRequests)
     }
 
-    private fun process(client : suspend ()-> Result): Long {
+    private fun process(client: KSuspendFunction0<Result>,numberOfSimultaneousRequests: Int): Long {
         val response = measureTimedValue {
             val channel = Channel<Result>(Channel.UNLIMITED)
+
+            // Launch a coroutine for each request and send the results to the channel
+            // This is basically firing off 500 requests in parallel
+
             runBlocking {
                 val job = launch {
-                    repeat(i) {
+                    repeat(numberOfSimultaneousRequests) {
                         launch {
                             val result = client()
                             channel.send(result)
@@ -49,7 +52,10 @@ class DemoClientController(webclientBuilder: WebClient.Builder) {
 
                 job.join() // Wait for all requests to complete
                 channel.close()
+
+                // Receive the results from the channel
                 val results = channel.receiveAsFlow().toList()
+                println(results)
             }
         }
 
