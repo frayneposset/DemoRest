@@ -1,16 +1,19 @@
 package com.example.demorest
 
-import kotlinx.coroutines.*
-
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import org.springframework.http.client.reactive.ReactorClientHttpConnector
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.client.RestTemplate
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.awaitBody
+import reactor.netty.http.client.HttpClient
+import reactor.netty.resources.ConnectionProvider
 import kotlin.reflect.KSuspendFunction0
 import kotlin.time.measureTimedValue
 
@@ -18,21 +21,32 @@ import kotlin.time.measureTimedValue
 class DemoClientController(webclientBuilder: WebClient.Builder) {
 
     val restTemplate = RestTemplate()
-    val webClient = webclientBuilder.build()
+
+    val webClient = webclientBuilder.clientConnector(
+        ReactorClientHttpConnector(
+            HttpClient.create(
+                ConnectionProvider.builder("myConnectionPool")
+                    .maxConnections(500)
+                    .pendingAcquireMaxCount(500)
+                    .build()
+            )
+        )
+    ).build()
+
     val url = "http://localhost:8080/people/50"
 
     @GetMapping("/restTemplate/{numberOfSimultaneousRequests}")
     fun restTemplate(@PathVariable numberOfSimultaneousRequests: Int): Long {
-        return process(::restTemplateResult,numberOfSimultaneousRequests)
+        return process(::restTemplateResult, numberOfSimultaneousRequests)
     }
 
 
     @GetMapping("/webClient/{numberOfSimultaneousRequests}")
     suspend fun webClient(@PathVariable numberOfSimultaneousRequests: Int): Long {
-        return process(::webClientResult,numberOfSimultaneousRequests)
+        return process(::webClientResult, numberOfSimultaneousRequests)
     }
 
-    private fun process(client: KSuspendFunction0<Result>,numberOfSimultaneousRequests: Int): Long {
+    private fun process(client: KSuspendFunction0<Result>, numberOfSimultaneousRequests: Int): Long {
         val response = measureTimedValue {
             val channel = Channel<Result>(Channel.UNLIMITED)
 
@@ -54,8 +68,7 @@ class DemoClientController(webclientBuilder: WebClient.Builder) {
                 channel.close()
 
                 // Receive the results from the channel
-                val results = channel.receiveAsFlow().toList()
-                println(results)
+                channel.receiveAsFlow().toList()
             }
         }
 
